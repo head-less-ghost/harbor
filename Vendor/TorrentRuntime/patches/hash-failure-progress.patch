@@ -1,0 +1,15 @@
+diff --git a/src/bittorrent/BtTaskAlerts.cc b/src/bittorrent/BtTaskAlerts.cc
+index 34c0ad1..dbdf168 100644
+--- a/src/bittorrent/BtTaskAlerts.cc
++++ b/src/bittorrent/BtTaskAlerts.cc
+@@ -150,7 +150,9 @@ void BtSession::handleAlert(lt::hash_failed_alert* failed)
+ {
+   auto download = findDownload(failed->handle);
+   if (download) {
+-    download->beginProgressVerification();
++    // A rejected piece is downloaded again without a full torrent check.
++    // Waiting for torrent_checked_alert here would freeze progress forever.
++    requestProgressRefresh(download.get());
+   }
+ }
+ 
