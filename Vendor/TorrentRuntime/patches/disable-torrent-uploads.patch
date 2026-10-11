@@ -1,0 +1,149 @@
+diff --git a/src/BtSettings.cc b/src/BtSettings.cc
+index dfe0395..5e8ac0f 100644
+--- a/src/BtSettings.cc
++++ b/src/BtSettings.cc
+@@ -233,6 +233,8 @@ BtConfig makeBtConfig(const Option* option)
+ 
+   settings.set_bool(lt::settings_pack::enable_dht, allowDht);
+   config.dhtEnabled = allowDht;
++  settings.set_bool(lt::settings_pack::enable_uploads,
++                    option->getAsBool(PREF_BT_ENABLE_UPLOADS));
+   settings.set_bool(lt::settings_pack::enable_lsd, allowLsd);
+   settings.set_bool(lt::settings_pack::enable_upnp, allowPortMapping);
+   settings.set_bool(lt::settings_pack::enable_natpmp, allowPortMapping);
+diff --git a/src/bittorrent/BtSessionControl.cc b/src/bittorrent/BtSessionControl.cc
+index 646419c..b0650c2 100644
+--- a/src/bittorrent/BtSessionControl.cc
++++ b/src/bittorrent/BtSessionControl.cc
+@@ -93,7 +93,21 @@ void BtSession::applyGlobalOptions(const Option* option)
+ {
+   auto config = makeBtConfig(option);
+   const bool networkChanged = !impl_->config.hasSameNetwork(config);
++  const bool uploadsDisabled =
++      impl_->config.settings.get_bool(lt::settings_pack::enable_uploads) &&
++      !config.settings.get_bool(lt::settings_pack::enable_uploads);
+   impl_->session->apply_settings(config.settings);
++  if (uploadsDisabled) {
++    // Drop queued payload and disk reads on existing connections. New peers
++    // inherit the upload gate before they can request any file pieces.
++    for (const auto& [key, owner] : impl_->handles) {
++      if (const auto download = owner.lock()) {
++        auto handle = download->impl_->handle;
++        handle.clear_peers();
++        handle.force_reannounce(0, lt::torrent_handle::high_priority);
++      }
++    }
++  }
+   impl_->config = std::move(config);
+   impl_->downloadRateLimit = option->getAsInt(PREF_MAX_OVERALL_DOWNLOAD_LIMIT);
+   if (networkChanged) {
+diff --git a/src/options/BitTorrentOptions.cc b/src/options/BitTorrentOptions.cc
+index 2442eff..3cb4419 100644
+--- a/src/options/BitTorrentOptions.cc
++++ b/src/options/BitTorrentOptions.cc
+@@ -56,6 +56,15 @@ void addBitTorrentOptions(OptionHandlers& handlers)
+ {
+ // BitTorrent Specific Options
+ #ifdef ENABLE_BITTORRENT
++  {
++    std::unique_ptr<OptionHandler> op(new BooleanOptionHandler(
++        PREF_BT_ENABLE_UPLOADS,
++        "Allow torrent file uploads. Protocol messages are unaffected.",
++        A2_V_TRUE, OptionHandler::OPT_ARG));
++    op->addTag(TAG_BITTORRENT);
++    op->setChangeGlobalOption(true);
++    handlers.push_back(std::move(op));
++  }
+   {
+     std::unique_ptr<OptionHandler> op(
+         new BooleanOptionHandler(PREF_BT_ENABLE_LPD, TEXT_BT_ENABLE_LPD,
+diff --git a/src/prefs.cc b/src/prefs.cc
+index 9533b39..03d563c 100644
+--- a/src/prefs.cc
++++ b/src/prefs.cc
+@@ -522,6 +522,7 @@ PrefPtr PREF_BT_EXTERNAL_PORT = makePref("bt-external-port");
+ PrefPtr PREF_INDEX_OUT = makePref("index-out");
+ // values: true | false
+ PrefPtr PREF_BT_ENABLE_LPD = makePref("bt-enable-lpd");
++PrefPtr PREF_BT_ENABLE_UPLOADS = makePref("bt-enable-uploads");
+ // values: 1*digit
+ PrefPtr PREF_BT_TRACKER_COMPLETION_TIMEOUT =
+     makePref("bt-tracker-completion-timeout");
+diff --git a/src/prefs.h b/src/prefs.h
+index c00a6f0..46c83c4 100644
+--- a/src/prefs.h
++++ b/src/prefs.h
+@@ -505,6 +505,7 @@ extern PrefPtr PREF_BT_EXTERNAL_PORT;
+ extern PrefPtr PREF_INDEX_OUT;
+ // values: true | false
+ extern PrefPtr PREF_BT_ENABLE_LPD;
++extern PrefPtr PREF_BT_ENABLE_UPLOADS;
+ // values: 1*digit
+ extern PrefPtr PREF_BT_TRACKER_COMPLETION_TIMEOUT;
+ // values: 1*digit
+diff --git a/third_party/libtorrent/include/libtorrent/settings_pack.hpp b/third_party/libtorrent/include/libtorrent/settings_pack.hpp
+index 02a3546..be393da 100644
+--- a/third_party/libtorrent/include/libtorrent/settings_pack.hpp
++++ b/third_party/libtorrent/include/libtorrent/settings_pack.hpp
+@@ -1074,6 +1074,9 @@ namespace aux {
+ 			// built-in immediate plaintext fallback.
+ 			prefer_encrypted_connections,
+ 
++			// Allow sending file pieces. Metadata and protocol messages remain enabled.
++			enable_uploads,
++
+ 			max_bool_setting_internal
+ 		};
+ 
+diff --git a/third_party/libtorrent/src/peer_connection.cpp b/third_party/libtorrent/src/peer_connection.cpp
+index 2ab8304..49dec8e 100644
+--- a/third_party/libtorrent/src/peer_connection.cpp
++++ b/third_party/libtorrent/src/peer_connection.cpp
+@@ -2392,6 +2392,13 @@ namespace {
+ 		TORRENT_ASSERT(t);
+ 		torrent_info const& ti = t->torrent_file();
+ 
++		// Reject every file request, including allowed-fast and local peers.
++		if (!m_settings.get_bool(settings_pack::enable_uploads))
++		{
++			write_reject_request(r);
++			return;
++		}
++
+ 		m_counters.inc_stats_counter(counters::piece_requests);
+ 
+ #ifndef TORRENT_DISABLE_LOGGING
+@@ -3865,7 +3872,7 @@ namespace {
+ 		TORRENT_ASSERT(is_single_thread());
+ 		INVARIANT_CHECK;
+ 
+-		if (!m_choked) return false;
++		if (!m_choked || !m_settings.get_bool(settings_pack::enable_uploads)) return false;
+ 		auto t = m_torrent.lock();
+ 		if (!t->ready_for_connections()) return false;
+ 
+@@ -5653,6 +5660,12 @@ namespace {
+ 		{
+ 			t->add_suggest_piece(r.piece);
+ 		}
++		// An upload policy change can race a completed disk read.
++		if (!m_settings.get_bool(settings_pack::enable_uploads))
++		{
++			write_reject_request(r);
++			return;
++		}
+ 		write_piece(r, std::move(buffer));
+ 	}
+ 
+diff --git a/third_party/libtorrent/src/settings_pack.cpp b/third_party/libtorrent/src/settings_pack.cpp
+index b1a3e88..cd6fcd2 100644
+--- a/third_party/libtorrent/src/settings_pack.cpp
++++ b/third_party/libtorrent/src/settings_pack.cpp
+@@ -222,6 +222,7 @@ namespace {
+ 		SET(allow_multiple_connections_per_pid, false, nullptr),
+ 		SET(apply_filter_to_dht, true, nullptr),
+ 		SET(prefer_encrypted_connections, false, nullptr),
++		SET(enable_uploads, true, nullptr),
+ 	}});
+ 
+ 	CONSTEXPR_SETTINGS

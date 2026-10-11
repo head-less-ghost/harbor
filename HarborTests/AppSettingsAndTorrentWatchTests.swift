@@ -112,6 +112,33 @@ final class AppSettingsAndTorrentWatchTests: XCTestCase {
         XCTAssertTrue(restoredSettings.preventSleepWhileDownloading)
     }
 
+    func testTorrentUploadPolicyPersistsAcrossRestartAndTrafficModes() {
+        let suiteName = "HarborTests.UploadPolicy.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = AppSettingsStore(userDefaults: defaults)
+        XCTAssertTrue(settings.seedTorrents)
+        settings.seedNewTorrents = false
+        settings.stopSeedingAtRatioEnabled = true
+        settings.stopSeedingRatio = 1.5
+        var observed: DownloadTransferSettings?
+        settings.transferSettingsDidChange = { observed = $0 }
+        settings.seedTorrents = false
+        XCTAssertEqual(observed?.allowsTorrentUploads, false)
+        for mode in TrafficMode.allCases {
+            settings.trafficMode = mode
+            XCTAssertFalse(settings.transferSettings.allowsTorrentUploads)
+        }
+        let restored = AppSettingsStore(userDefaults: defaults)
+        XCTAssertFalse(restored.seedTorrents)
+        XCTAssertFalse(restored.transferSettings.allowsTorrentUploads)
+        XCTAssertFalse(restored.seedNewTorrents)
+        XCTAssertEqual(restored.seedingRatioLimit, 1.5)
+        restored.seedTorrents = true
+        XCTAssertTrue(restored.transferSettings.allowsTorrentUploads)
+        XCTAssertFalse(restored.seedNewTorrents)
+    }
+
     func testSeedingRatioLimitDefaultsOffAndPersists() {
         let suiteName = "HarborTests.SeedingRatio.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!

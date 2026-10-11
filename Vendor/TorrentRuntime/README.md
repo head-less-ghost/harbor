@@ -15,6 +15,11 @@ with the patches in `patches/`:
   hash failure does not start a full torrent check, so it must not wait for
   `torrent_checked_alert`. That wait froze completed bytes and prevented completion
   from reaching Harbor even when the recovered file was correct.
+- `disable-torrent-uploads.patch`: Add the session-wide `bt-enable-uploads` option.
+  When false, libtorrent rejects file-piece requests, blocks pending disk-read
+  results, and closes existing peer connections on a live policy change. The
+  default is true. Metadata and protocol messages remain enabled. The policy
+  covers TCP, uTP, encrypted connections, local peers, and allowed-fast requests.
 - `macos-cstring-include-order.patch`: Include the C++ string header before GPAC
   defines its string-function macros. This permits a build with the current Apple SDK.
 
@@ -42,6 +47,7 @@ cmake -S . -B build/runtime -G Ninja \
 cmake --build build/runtime -j8
 ctest --test-dir build/runtime/source --output-on-failure
 python3 "$harbor_root/Scripts/test-torrent-hash-recovery.py" build/runtime/aria2-next
+python3 "$harbor_root/Scripts/test-torrent-upload-policy.py" build/runtime/aria2-next
 packaging/scripts/check-runtime-deps macos build/runtime/aria2-next
 strip build/runtime/aria2-next
 codesign --force --sign - build/runtime/aria2-next
@@ -52,6 +58,11 @@ The regression uses a corrupt local peer and a valid local web seed. It verifies
 the recovered file, full progress, and completion without a restart. It does not
 use the running Harbor session or external peers. An Intel binary requires
 Rosetta when the test runs on Apple Silicon.
+
+The upload-policy check uses isolated engines and loopback peers. It verifies a
+live upload stop during a partial download, a partial-download restart, correct download completion, blocked
+uploads after a completed-download restart, and uploads after re-enabling the option. It
+covers plain TCP, encrypted TCP, and encrypted uTP.
 
 Each `TorrentRuntime/<arch>/bin` folder includes the standalone `aria2-next` binary so Harbor can launch torrents without requiring Homebrew on the user's Mac.
 

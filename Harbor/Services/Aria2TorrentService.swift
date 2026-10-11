@@ -1413,6 +1413,8 @@ actor Aria2TorrentService {
             // Per-download options override this unlimited daemon default.
             // TODO: Add per-torrent ratio overrides if one global preference becomes too limiting.
             "--seed-ratio=0.0",
+            // TODO: Replace the bundled upload-control patch when upstream supports this option.
+            "--bt-enable-uploads=\(transferSettings.allowsTorrentUploads)",
             "--follow-torrent=true",
             "--pause=true",
             "--enable-dht=false",
@@ -1654,6 +1656,7 @@ actor Aria2TorrentService {
 
     private func globalOptions(_ transferSettings: DownloadTransferSettings) -> [String: String] {
         [
+            "bt-enable-uploads": "\(transferSettings.allowsTorrentUploads)",
             "max-concurrent-downloads": "\(transferSettings.maxConcurrentDownloads)",
             "max-overall-download-limit": Self.aria2LimitString(transferSettings.globalSpeedLimitBytesPerSecond),
             "max-overall-upload-limit": Self.aria2LimitString(transferSettings.globalUploadSpeedLimitBytesPerSecond)

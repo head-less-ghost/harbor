@@ -1343,7 +1343,7 @@ final class DownloadCenter {
 
             Self.configureDownloadedTorrentHandoff(
                 item,
-                shouldSeedAfterDownload: self.settings.seedNewTorrents
+                shouldSeedAfterDownload: self.settings.seedTorrents && self.settings.seedNewTorrents
             )
             item.torrentFingerprint = managedSource.fingerprint
             item.torrentSourceFingerprint = managedSource.sourceFingerprint
@@ -1901,6 +1901,7 @@ final class DownloadCenter {
     }
 
     var globalTrafficMode: TrafficMode { settings.trafficMode }
+    var canSeedTorrents: Bool { settings.seedTorrents }
 
     func differingTrafficModeOverride(for item: DownloadItem) -> TrafficMode? {
         guard let mode = item.trafficModeOverride else { return nil }
@@ -2828,7 +2829,7 @@ final class DownloadCenter {
             managedTorrentSourcePath: managedTorrentSource?.managedURL.path,
             torrentFileSelection: request.torrentFileSelection,
             downloadsTorrentPiecesSequentially: request.downloadsTorrentPiecesSequentially,
-            shouldSeedAfterDownload: backend == .aria2 ? settings.seedNewTorrents : false,
+            shouldSeedAfterDownload: backend == .aria2 && settings.seedTorrents && settings.seedNewTorrents,
             tags: canonicalTags(request.tags)
         )
 
@@ -4327,7 +4328,8 @@ final class DownloadCenter {
     }
 
     func startSeeding(id: UUID) {
-        guard let item = item(for: id),
+        guard settings.seedTorrents,
+              let item = item(for: id),
               item.backend == .aria2,
               item.finishedAt != nil else {
             return
@@ -6341,6 +6343,18 @@ final class DownloadCenter {
     private func applyTransferSettings(_ transferSettings: DownloadTransferSettings) {
         coordinator.updateTransferSettings(transferSettings)
 
+        if !transferSettings.allowsTorrentUploads {
+            for item in downloads where item.backend == .aria2 && item.shouldSeedAfterDownload {
+                if item.finishedAt != nil {
+                    stopSeeding(id: item.id)
+                } else {
+                    item.shouldSeedAfterDownload = false
+                    item.updatedAt = .now
+                }
+            }
+            schedulePersist()
+        }
+
         let activeTorrentItems = downloads.filter {
             $0.backend == .aria2 && $0.backendIdentifier != nil
         }
@@ -6375,7 +6389,7 @@ final class DownloadCenter {
             uploadLimitBytesPerSecond: item.uploadLimitOverride.resolvedBytesPerSecond(
                 inheriting: settings.transferSettings.perDownloadUploadSpeedLimitBytesPerSecond
             ),
-            shouldSeed: item.shouldSeedAfterDownload,
+            shouldSeed: settings.seedTorrents && item.shouldSeedAfterDownload,
             seedRatioLimit: settings.seedingRatioLimit,
             verifyExistingData: item.finishedAt != nil,
             selectedFileIndexes: item.torrentFileSelection?.selectedIndexes,

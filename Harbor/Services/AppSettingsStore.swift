@@ -52,7 +52,8 @@ enum TrafficMode: String, CaseIterable, Identifiable, Sendable {
             perDownloadSpeedLimitBytesPerSecond: limits.perDownload,
             globalUploadSpeedLimitBytesPerSecond: limits.upload,
             perDownloadUploadSpeedLimitBytesPerSecond: limits.perUpload,
-            perDownloadConnectionCount: customSettings.perDownloadConnectionCount
+            perDownloadConnectionCount: customSettings.perDownloadConnectionCount,
+            allowsTorrentUploads: customSettings.allowsTorrentUploads
         )
     }
 }
@@ -75,6 +76,7 @@ struct DownloadTransferSettings: Equatable, Sendable {
     let globalUploadSpeedLimitBytesPerSecond: Int64?
     let perDownloadUploadSpeedLimitBytesPerSecond: Int64?
     let perDownloadConnectionCount: Int
+    var allowsTorrentUploads: Bool = true
 }
 
 @Observable
@@ -86,6 +88,7 @@ final class AppSettingsStore {
         static let torrentWatchFolderPath = "torrentWatchFolderPath"
         static let torrentWatchFolderEnabled = "torrentWatchFolderEnabled"
         static let seedNewTorrents = "seedNewTorrents"
+        static let seedTorrents = "seedTorrents"
         static let mediaPreferredFormat = "mediaPreferredFormat"
         static let mediaMaximumResolution = "mediaMaximumResolution"
         static let removeCompletedDownloadsAutomatically = "removeCompletedDownloadsAutomatically"
@@ -186,6 +189,13 @@ final class AppSettingsStore {
     var removeCompletedDownloadsAutomatically: Bool {
         didSet {
             userDefaults.set(removeCompletedDownloadsAutomatically, forKey: Keys.removeCompletedDownloadsAutomatically)
+        }
+    }
+
+    var seedTorrents: Bool {
+        didSet {
+            userDefaults.set(seedTorrents, forKey: Keys.seedTorrents)
+            notifyTransferSettingsChanged()
         }
     }
 
@@ -439,6 +449,7 @@ final class AppSettingsStore {
         self.torrentWatchFolderPath = userDefaults.string(forKey: Keys.torrentWatchFolderPath)
             ?? defaultDownloadsPath
         self.torrentWatchFolderEnabled = userDefaults.bool(forKey: Keys.torrentWatchFolderEnabled)
+        self.seedTorrents = userDefaults.object(forKey: Keys.seedTorrents) as? Bool ?? true
         if userDefaults.object(forKey: Keys.seedNewTorrents) == nil {
             self.seedNewTorrents = true
         } else {
@@ -619,7 +630,8 @@ final class AppSettingsStore {
             perDownloadConnectionCount: Self.clamped(
                 perDownloadConnectionCount,
                 to: Self.perDownloadConnectionCountRange
-            )
+            ),
+            allowsTorrentUploads: seedTorrents
         )
 
         return trafficMode.applying(to: customSettings)

@@ -165,37 +165,44 @@ struct TorrentsSettingsTab: View {
             }
 
             Section("Seeding") {
-                Toggle("Seed torrents after downloading", isOn: $settings.seedNewTorrents)
-                Text("Applies to new torrents. Torrents can still upload while downloading.")
+                Toggle("Seed torrents", isOn: $settings.seedTorrents)
+                Text("When off, torrents do not upload file data, including while downloading. Network messages are still required.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
-                if settings.seedNewTorrents {
-                    LabeledContent("Stop at Share Ratio") {
-                        HStack(spacing: 8) {
-                            Toggle("Stop at Share Ratio", isOn: $settings.stopSeedingAtRatioEnabled)
-                                .labelsHidden()
-
-                            TextField(
-                                "Ratio",
-                                value: $settings.stopSeedingRatio,
-                                format: .number.precision(.fractionLength(1...2))
-                            )
-                            .labelsHidden()
-                            .textFieldStyle(.roundedBorder)
-                            .multilineTextAlignment(.trailing)
-                            .monospacedDigit()
-                            .frame(width: 72)
-                            .disabled(!settings.stopSeedingAtRatioEnabled)
-
-                            Text("ratio")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Text("Stops seeding after Harbor uploads the selected multiple of the torrent size.")
+                if settings.seedTorrents {
+                    Toggle("Continue seeding after download", isOn: $settings.seedNewTorrents)
+                    Text("Applies to new torrents.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    if settings.seedNewTorrents {
+                        LabeledContent("Stop at Share Ratio") {
+                            HStack(spacing: 8) {
+                                Toggle("Stop at Share Ratio", isOn: $settings.stopSeedingAtRatioEnabled)
+                                    .labelsHidden()
+
+                                TextField(
+                                    "Ratio",
+                                    value: $settings.stopSeedingRatio,
+                                    format: .number.precision(.fractionLength(1...2))
+                                )
+                                .labelsHidden()
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                                .monospacedDigit()
+                                .frame(width: 72)
+                                .disabled(!settings.stopSeedingAtRatioEnabled)
+
+                                Text("ratio")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Text("Stops seeding after Harbor uploads the selected multiple of the torrent size.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 

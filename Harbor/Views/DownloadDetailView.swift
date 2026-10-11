@@ -29,6 +29,7 @@ private struct DownloadInspectorContent: View {
                     continueInBrowser: continueInBrowser,
                     togglePauseResume: togglePauseResume,
                     retry: retry,
+                    allowsSeeding: center.canSeedTorrents,
                     startSeeding: startSeeding,
                     stopSeeding: stopSeeding,
                     openFile: openFile,
@@ -440,6 +441,7 @@ private struct DownloadActionRow: View {
     let continueInBrowser: () -> Void
     let togglePauseResume: () -> Void
     let retry: () -> Void
+    let allowsSeeding: Bool
     let startSeeding: () -> Void
     let stopSeeding: () -> Void
     let openFile: () -> Void
@@ -546,7 +548,7 @@ private struct DownloadActionRow: View {
 
             Button("Copy Source URL", systemImage: "link", action: copySourceURL)
 
-            if item.backend == .aria2, item.status == .completed {
+            if item.backend == .aria2, item.status == .completed, allowsSeeding {
                 Button("Start Seeding", systemImage: "arrow.up.circle", action: startSeeding)
             }
 

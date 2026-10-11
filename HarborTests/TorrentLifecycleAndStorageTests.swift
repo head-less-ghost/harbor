@@ -41,6 +41,36 @@ final class TorrentLifecycleAndStorageTests: XCTestCase {
         await center.shutdownForTermination()
     }
 
+    func testMasterSwitchStopsSeedersAndPreventsRestartingThem() async {
+        let suiteName = "HarborTests.MasterSeeding.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let settings = AppSettingsStore(userDefaults: defaults)
+        let center = DownloadCenter(settings: settings, persistence: DownloadPersistence(directoryURL: directory))
+        let seeder = DownloadItem(
+            sourceURL: URL(fileURLWithPath: "/tmp/example.torrent"), sourceKind: .torrentFile,
+            backend: .aria2, preferredFilename: nil, destinationFolderPath: "/tmp",
+            status: .seeding, finishedAt: .now, backendIdentifier: nil, shouldSeedAfterDownload: true
+        )
+        let downloading = DownloadItem(
+            sourceURL: URL(fileURLWithPath: "/tmp/partial.torrent"), sourceKind: .torrentFile,
+            backend: .aria2, preferredFilename: nil, destinationFolderPath: "/tmp",
+            status: .downloading, backendIdentifier: nil, shouldSeedAfterDownload: true
+        )
+        center.downloads = [seeder, downloading]
+        settings.seedTorrents = false
+        XCTAssertEqual(seeder.status, .completed)
+        XCTAssertFalse(seeder.shouldSeedAfterDownload)
+        XCTAssertEqual(downloading.status, .downloading)
+        XCTAssertFalse(downloading.shouldSeedAfterDownload)
+        center.startSeeding(id: seeder.id)
+        XCTAssertEqual(seeder.status, .completed)
+        XCTAssertFalse(center.canSeedTorrents)
+        await center.shutdownForTermination()
+    }
+
     func testPausedSeederIsNotCancellableAsAFreshDownload() async {
         let suiteName = "HarborTests.PausedSeederCancellation.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!
