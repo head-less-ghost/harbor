@@ -346,6 +346,7 @@ final class DownloadCoordinator: NSObject, @unchecked Sendable {
         id: UUID,
         attemptIdentifier: UUID = UUID(),
         sourceURL: URL,
+        resolvedURL: URL? = nil,
         requestHeaders: [RequestHeader] = [],
         speedLimitOverride: TransferLimitOverride = .inherit
     ) throws -> Int {
@@ -378,9 +379,9 @@ final class DownloadCoordinator: NSObject, @unchecked Sendable {
         let preparation = try recoveryStore.prepareStart(id: id, sourceURL: sourceURL)
         let task = session.dataTask(
             with: DirectDownloadResponsePolicy.request(
-                sourceURL: sourceURL,
+                sourceURL: resolvedURL ?? sourceURL,
                 recovery: preparation.snapshot,
-                requestHeaders: requestHeaders
+                requestHeaders: resolvedURL == nil ? requestHeaders : []
             )
         )
         let ownedRecovery = preparation.snapshot

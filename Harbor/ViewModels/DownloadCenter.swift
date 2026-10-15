@@ -4970,10 +4970,37 @@ final class DownloadCenter {
     private func startDirectDownload(
         _ item: DownloadItem,
         restartingFromBeginning: Bool = false,
-        skippingExistingFileCheck: Bool = false
+        skippingExistingFileCheck: Bool = false,
+        resolvedURL: URL? = nil,
+        didResolveMediaFire: Bool = false
     ) {
         guard directAttemptStates[item.id] == nil,
               directPreflightTasks[item.id] == nil else {
+            return
+        }
+        if !didResolveMediaFire, MediaFireSourceResolver.isFileURL(item.sourceURL) {
+            let id = item.id
+            let sourceURL = item.sourceURL
+            let proxy = settings.proxySettings
+            setStatus(for: item, to: .preparing)
+            directPreflightTasks[id] = Task { @MainActor [weak self] in
+                // If the page needs interaction, the ordinary HTTP flow offers browser continuation.
+                let target = try? await MediaFireSourceResolver.downloadURL(for: sourceURL, proxy: proxy)
+                guard let self else { return }
+                self.directPreflightTasks.removeValue(forKey: id)
+                guard let item = self.item(for: id), item.status == .preparing,
+                      !self.isShuttingDown, !Task.isCancelled,
+                      self.cancellationTasks[id] == nil, self.removalTasks[id] == nil else {
+                    self.startNextQueuedDownloadsIfNeeded()
+                    return
+                }
+                if item.preferredFilename == nil {
+                    item.preferredFilename = target?.filename
+                }
+                self.startDirectDownload(item, restartingFromBeginning: restartingFromBeginning,
+                    skippingExistingFileCheck: skippingExistingFileCheck, resolvedURL: target?.url,
+                    didResolveMediaFire: true)
+            }
             return
         }
 
@@ -5018,6 +5045,7 @@ final class DownloadCenter {
                 id: item.id,
                 attemptIdentifier: attemptIdentifier,
                 sourceURL: item.sourceURL,
+                resolvedURL: resolvedURL,
                 requestHeaders: item.requestHeaders,
                 speedLimitOverride: item.downloadLimitOverride
             )

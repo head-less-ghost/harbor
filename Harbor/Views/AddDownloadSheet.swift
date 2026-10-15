@@ -47,6 +47,8 @@ struct AddDownloadSheet: View {
     @State private var mediaPreviewError: String?
     @State private var batchMedia: [URL: MediaDownloadMetadata] = [:]
     @State private var batchErrors: [URL: String] = [:]
+    @State private var requestedBatchMediaURLs: Set<URL> = []
+    @State private var isLoadingMediaFireFolder = false
     @State private var mediaDefaultsError: String?
     @State private var mediaFormatPreference: MediaDownloadFormatPreference = .bestAvailable
     @State private var hasMediaSavePermission = true
@@ -115,6 +117,17 @@ struct AddDownloadSheet: View {
                             batchSummaryRow
                         } else {
                             mediaPreviewRows
+                            if let url = parsedLinkURL, MediaFireSourceResolver.isFolderURL(url) {
+                                Button("Load Folder") { loadMediaFireFolder(url) }
+                                    .disabled(isResolvingMedia)
+                                Text("Lists files in this public MediaFire folder and its subfolders. Files use the selected save folder.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else if let url = parsedLinkURL, MediaFireSourceResolver.isFileURL(url) {
+                                Text("Harbor will resolve the MediaFire download link automatically.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     } else {
                         LabeledContent("Torrent File") {
@@ -345,7 +358,7 @@ struct AddDownloadSheet: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Checking link…")
+                    Text(isLoadingMediaFireFolder ? "Loading folder…" : "Checking link…")
                         .foregroundStyle(.secondary)
                 }
             }
@@ -677,6 +690,7 @@ struct AddDownloadSheet: View {
                   let detectedKind = DownloadSourceKind.detect(from: parsedURL) else {
                 return false
             }
+            if MediaFireSourceResolver.isFolderURL(parsedURL) { return false }
 
             guard detectedKind == .directURL || detectedKind == .magnetLink || detectedKind == .torrentFile else {
                 return false
@@ -721,7 +735,8 @@ struct AddDownloadSheet: View {
 
     private var readyBatchURLs: [URL] {
         parsedBatchURLs.filter { url in
-            batchErrors[url] == nil && batchDefaultError(for: url) == nil && (!isKnownMediaHost(url) || batchMedia[url] != nil)
+            !MediaFireSourceResolver.isFolderURL(url)
+                && batchErrors[url] == nil && batchDefaultError(for: url) == nil && (!requiresBatchMediaResolution(url) || batchMedia[url] != nil)
                 && (batchMedia[url] == nil || requestHeaders.isEmpty)
         }
     }
@@ -741,15 +756,21 @@ struct AddDownloadSheet: View {
             return entry.status == .duplicate ? String(localized: "Duplicate") : String(localized: "Skipped")
         }
         if let error = batchErrors[url] ?? batchDefaultError(for: url) { return error }
-        if isKnownMediaHost(url), batchMedia[url] == nil { return String(localized: "Checking…") }
+        if MediaFireSourceResolver.isFolderURL(url) { return String(localized: "Load this folder separately to list its files.") }
+        if requiresBatchMediaResolution(url), batchMedia[url] == nil { return String(localized: "Checking…") }
         if batchMedia[url] != nil, !requestHeaders.isEmpty {
             return String(localized: "Remove request headers to add media downloads.")
         }
-        return String(localized: "Ready")
+        return batchMedia[url] == nil ? String(localized: "Ready") : String(localized: "Media ready")
+    }
+
+    private func requiresBatchMediaResolution(_ url: URL) -> Bool {
+        isKnownMediaHost(url) || requestedBatchMediaURLs.contains(url)
     }
 
     private var isBatchEntry: Bool {
-        entryMode == .linkOrMagnet && batchEntries.count > 1
+        entryMode == .linkOrMagnet && (batchEntries.count > 1
+            || parsedBatchURLs.contains { batchErrors[$0] != nil || requestedBatchMediaURLs.contains($0) })
     }
 
     private var skippedBatchLineCount: Int {
@@ -776,7 +797,7 @@ struct AddDownloadSheet: View {
                 LazyVStack(spacing: 6) {
                     ForEach(batchEntries) { entry in
                         HStack(spacing: 8) {
-                            if let url = entry.url, isKnownMediaHost(url),
+                            if let url = entry.url, requiresBatchMediaResolution(url),
                                batchMedia[url] == nil, batchErrors[url] == nil {
                                 ProgressView().controlSize(.small)
                             } else {
@@ -797,6 +818,10 @@ struct AddDownloadSheet: View {
                 }
             }
             .frame(maxHeight: 140)
+            if canTryAsMedia {
+                Button("Try as Media") { tryAsMedia() }
+                    .accessibilityIdentifier(HarborAccessibility.addTryAsMedia)
+            }
             if !batchMedia.isEmpty {
                 Toggle("I own this content or have permission to save it", isOn: $hasMediaSavePermission)
             }
@@ -873,10 +898,14 @@ struct AddDownloadSheet: View {
     }
 
     private var canTryAsMedia: Bool {
+        if isBatchEntry {
+            return !isResolvingMedia && !batchMediaCandidates.isEmpty
+        }
         guard entryMode == .linkOrMagnet,
               isBatchEntry == false,
               let url = parsedLinkURL,
               DownloadSourceKind.detect(from: url) == .directURL,
+              !MediaFireSourceResolver.isFileURL(url), !MediaFireSourceResolver.isFolderURL(url),
               isKnownMediaHost(url) == false,
               mediaPreview == nil,
               isResolvingMedia == false else {
@@ -884,6 +913,13 @@ struct AddDownloadSheet: View {
         }
 
         return true
+    }
+
+    private var batchMediaCandidates: [URL] {
+        parsedBatchURLs.filter {
+            DownloadSourceKind.detect(from: $0) == .directURL && batchMedia[$0] == nil
+                && !MediaFireSourceResolver.isFileURL($0) && !MediaFireSourceResolver.isFolderURL($0)
+        }
     }
 
     @MainActor
@@ -1205,10 +1241,11 @@ struct AddDownloadSheet: View {
         let currentURLs = Set(parsedBatchURLs)
         batchMedia = batchMedia.filter { currentURLs.contains($0.key) }
         batchErrors = batchErrors.filter { currentURLs.contains($0.key) }
+        requestedBatchMediaURLs.formIntersection(currentURLs)
 
         if isBatchEntry {
             let urls = parsedBatchURLs.filter {
-                isKnownMediaHost($0) && batchMedia[$0] == nil && batchErrors[$0] == nil
+                requiresBatchMediaResolution($0) && batchMedia[$0] == nil && batchErrors[$0] == nil
             }
             isResolvingMedia = !urls.isEmpty
             mediaPreviewTask = Task { @MainActor in
@@ -1253,6 +1290,12 @@ struct AddDownloadSheet: View {
 
     @MainActor
     private func tryAsMedia() {
+        if isBatchEntry {
+            requestedBatchMediaURLs.formUnion(batchMediaCandidates)
+            batchErrors = [:]
+            scheduleMediaPreviewRefresh()
+            return
+        }
         guard let url = parsedLinkURL,
               DownloadSourceKind.detect(from: url) == .directURL,
               isKnownMediaHost(url) == false else {
@@ -1314,6 +1357,7 @@ struct AddDownloadSheet: View {
     }
 
     private func resetMediaPreview() {
+        isLoadingMediaFireFolder = false
         mediaPreview = nil
         mediaDefaultsError = nil
         mediaPreviewError = nil
@@ -1324,6 +1368,32 @@ struct AddDownloadSheet: View {
 
     private func isKnownMediaHost(_ url: URL) -> Bool {
         AddDownloadMediaResolver.isKnownMediaHost(url)
+    }
+
+    private func loadMediaFireFolder(_ url: URL) {
+        mediaPreviewTask?.cancel()
+        mediaPreviewGeneration += 1
+        let generation = mediaPreviewGeneration
+        isLoadingMediaFireFolder = true
+        isResolvingMedia = true
+        mediaPreviewError = nil
+        let proxy = settings.proxySettings
+        mediaPreviewTask = Task { @MainActor in
+            defer {
+                if mediaPreviewGeneration == generation {
+                    isLoadingMediaFireFolder = false
+                    isResolvingMedia = false
+                }
+            }
+            do {
+                let urls = try await MediaFireSourceResolver.fileURLs(in: url, proxy: proxy)
+                guard !Task.isCancelled, mediaPreviewGeneration == generation else { return }
+                sourceURLText = urls.map(\.absoluteString).joined(separator: "\n")
+            } catch {
+                guard !Task.isCancelled, mediaPreviewGeneration == generation else { return }
+                mediaPreviewError = error.localizedDescription
+            }
+        }
     }
 
 }
