@@ -103,6 +103,8 @@ Harbor.app includes a Safari extension that hands links to Harbor through the `h
 - **Click interception** (on by default): clicking a link with a `download` attribute, a `magnet:` link, or a link whose path ends in a download extension (`.dmg`, `.zip`, `.mp4`, `.torrent` and others) opens it in Harbor instead of Safari. Hold Option while clicking to let Safari download it. The extension list is `DOWNLOAD_EXTENSIONS` in `HarborSafariExtension/content.js`.
 - **Toolbar popup**: turn interception on or off, turn it off for the current site, or send the current page to Harbor. Harbor then offers yt-dlp for pages it recognizes, such as YouTube.
 
+Click interception also runs in embedded frames. The per-site toggle applies to the tab's website, including links in frames from other websites. Until the extension has loaded the saved settings and identified the tab's website, clicks stay in Safari.
+
 Safari has no downloads API for extensions, so this is an approximation. The extension sees link clicks, not downloads. It misses downloads started by scripts, form posts and redirects. When it misses one, Safari downloads the file as usual.
 
 ### Enable the extension
@@ -162,7 +164,7 @@ Opening a new tab with `tabs.create` was not used, because it leaves a blank tab
 
 Downloads that need you to be signed in may fail. Harbor fetches the URL itself, without Safari's cookies or session.
 
-In Safari 27.0.1, **Download with Harbor** appears in the context menu after the extension is first installed. After Safari relaunches, or after the extension is turned off and on, the item is missing. `contextMenus.create` still succeeds when the background script loads. Click interception and the toolbar popup don't depend on the background script and keep working.
+Safari 27.0.1 has shown a missing **Download with Harbor** context-menu item after Safari relaunches or the extension is turned off and on. The background script now updates an existing menu item or creates it if it is missing, without deleting the menu on each background wake. Loading a web page also wakes the background to identify the tab's website. Restart and extension-toggle checks are still required to confirm that the missing-menu issue is fixed.
 
 ## Philosophy
 

@@ -8,9 +8,13 @@ const DOWNLOAD_EXTENSIONS = [
 
 // Settings are cached so the click handler stays synchronous: Safari only lets a page open
 // another app while the click's user activation is still alive, and an await would end it.
-let settings = DEFAULT_SETTINGS;
+let settings = null;
+let interceptionSite = null;
 browser.storage.local.get(DEFAULT_SETTINGS).then((stored) => { settings = stored; });
-browser.storage.onChanged.addListener((changes) => {
+// Use the tab's site in every frame, including cross-origin and no-referrer frames.
+browser.runtime.sendMessage({ type: "get-interception-site" }).then((site) => { interceptionSite = site; });
+browser.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "local" || !settings) return;
     for (const [key, { newValue }] of Object.entries(changes)) {
         settings = { ...settings, [key]: newValue ?? DEFAULT_SETTINGS[key] };
     }
@@ -27,7 +31,7 @@ function isDownloadLink(link) {
 
 document.addEventListener("click", (event) => {
     if (event.altKey) return;
-    if (!settings.interceptEnabled || settings.disabledSites.includes(location.hostname)) return;
+    if (!settings?.interceptEnabled || !interceptionSite || settings.disabledSites.includes(interceptionSite)) return;
 
     const link = event.target.closest?.("a[href]");
     if (!link || !isDownloadLink(link)) return;
