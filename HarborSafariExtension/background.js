@@ -13,7 +13,6 @@ const menuReady = browser.contextMenus.update(DOWNLOAD_MENU_ID, DOWNLOAD_MENU).c
 menuReady.catch(console.error);
 
 // Register at script load so Safari can wake the non-persistent background at startup.
-// TODO: Verify menu restoration after restart and extension toggles in Safari 27.0.1.
 browser.runtime.onStartup.addListener(() => {});
 
 browser.contextMenus.onClicked.addListener((info, tab) => {

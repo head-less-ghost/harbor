@@ -164,7 +164,9 @@ Opening a new tab with `tabs.create` was not used, because it leaves a blank tab
 
 Downloads that need you to be signed in may fail. Harbor fetches the URL itself, without Safari's cookies or session.
 
-Safari 27.0.1 has shown a missing **Download with Harbor** context-menu item after Safari relaunches or the extension is turned off and on. The background script now updates an existing menu item or creates it if it is missing, without deleting the menu on each background wake. Loading a web page also wakes the background to identify the tab's website. Restart and extension-toggle checks are still required to confirm that the missing-menu issue is fixed.
+The background script updates an existing **Download with Harbor** menu item or creates it if it is missing. It does not delete the menu on each background wake. Loading a web page also wakes the background to identify the tab's website. In Safari 27.0.1, the menu was verified after a browser relaunch with development extensions allowed, after turning the extension off and on, and after background idle time.
+
+Safari can inject content scripts again when website access changes or the extension is turned back on. The scripts allow repeated injection without duplicate declarations or click handlers.
 
 ## Philosophy
 
