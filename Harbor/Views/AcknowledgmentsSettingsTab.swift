@@ -17,6 +17,7 @@ struct AcknowledgmentsSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+        .harborSurface()
     }
 }
 
@@ -56,6 +57,16 @@ private struct OpenSourceAcknowledgment: Identifiable {
             name: "aria2",
             license: "GNU GPL v2 or later",
             purpose: "Torrent and magnet downloads."
+        ),
+        OpenSourceAcknowledgment(
+            name: "OpenVPN 3 Core",
+            license: "Mozilla Public License 2.0",
+            purpose: "Private OpenVPN connections for torrents."
+        ),
+        OpenSourceAcknowledgment(
+            name: "WireGuard, gVisor, and BATorrent",
+            license: "MIT and Apache 2.0",
+            purpose: "Private WireGuard connections and the in-memory VPN network."
         ),
         OpenSourceAcknowledgment(
             name: "yt-dlp",

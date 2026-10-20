@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct AddDownloadSheet: View {
     private struct TorrentPreviewSource: Identifiable {
@@ -12,6 +13,7 @@ struct AddDownloadSheet: View {
     private enum PendingSensitiveTorrentAction {
         case preview(TorrentPreviewSource)
         case submit([AddDownloadRequest])
+        case manifest
     }
 
     private enum Layout {
@@ -30,12 +32,19 @@ struct AddDownloadSheet: View {
     let mediaPreviewProvider: @MainActor (URL) async throws -> MediaDownloadMetadata?
     let torrentPreviewProvider: @MainActor (DownloadSourceKind, URL, [RequestHeader]) async throws -> TorrentContentsPreview
     let onSubmit: @MainActor ([AddDownloadRequest]) -> Void
+    let onImport: (@MainActor ([AddDownloadRequest]) async -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focusedField: Field?
 
     @State private var entryMode: AddDownloadEntryMode
     @State private var sourceURLText: String
+    @State private var cachedBatchEntries: [DownloadSourceImportService.TextEntry]
+    @State private var manifestURL: URL?
+    @State private var manifest: DownloadManifest?
+    @State private var manifestTask: Task<Void, Never>?
+    @State private var isReadingManifest = false
+    @State private var importedCount = 0
     @State private var sourceFieldFrame: CGRect = .zero
     @State private var torrentFileURL: URL?
     @State private var destinationPath: String
@@ -70,6 +79,7 @@ struct AddDownloadSheet: View {
         torrentPreviewProvider: @escaping @MainActor (DownloadSourceKind, URL, [RequestHeader]) async throws -> TorrentContentsPreview = { _, _, _ in
             throw TorrentEngineError.invalidSource
         },
+        onImport: (@MainActor ([AddDownloadRequest]) async -> Void)? = nil,
         onSubmit: @escaping @MainActor ([AddDownloadRequest]) -> Void
     ) {
         self.availableTags = availableTags
@@ -78,8 +88,10 @@ struct AddDownloadSheet: View {
         self.mediaPreviewProvider = mediaPreviewProvider
         self.torrentPreviewProvider = torrentPreviewProvider
         self.onSubmit = onSubmit
+        self.onImport = onImport
         _entryMode = State(initialValue: draft.entryMode)
         _sourceURLText = State(initialValue: draft.sourceURLText)
+        _cachedBatchEntries = State(initialValue: DownloadSourceImportService.textEntries(from: draft.sourceURLText))
         _torrentFileURL = State(initialValue: draft.torrentFileURL)
         _destinationPath = State(initialValue: draft.destinationFolderURL.path)
     }
@@ -94,6 +106,17 @@ struct AddDownloadSheet: View {
             Form {
                 Section {
                     if entryMode == .linkOrMagnet {
+                        if let manifestURL {
+                            HStack {
+                                Image(systemName: "doc.text")
+                                TextField("Download list file", text: .constant(manifestURL.path))
+                                    .textFieldStyle(.plain)
+                                    .disabled(true)
+                                Button("Remove Download List", systemImage: "xmark.circle.fill") { clearManifest() }
+                                    .labelStyle(.iconOnly)
+                            }
+                            .accessibilityIdentifier("add.manifest.path")
+                        } else {
                         TextField(
                             "Source",
                             text: $sourceURLText,
@@ -109,10 +132,22 @@ struct AddDownloadSheet: View {
                             geometry.frame(in: .named("add-download-sheet"))
                         } action: { sourceFieldFrame = $0 }
                         .onChange(of: sourceURLText) {
+                            cachedBatchEntries = DownloadSourceImportService.textEntries(from: sourceURLText)
                             scheduleMediaPreviewRefresh()
                             updateDestinationForDetectedSourceIfNeeded()
                         }
 
+                        }
+                        if settings.manifestImportEnabled {
+                            Button("Import Links from File…", action: chooseManifest)
+                                .accessibilityIdentifier("add.manifest.choose")
+                        }
+                        if isReadingManifest {
+                            ProgressView("Reading download list…")
+                        }
+                        if isSubmitting, manifest != nil {
+                            ProgressView("Added \(importedCount) downloads…")
+                        }
                         if isBatchEntry {
                             batchSummaryRow
                         } else {
@@ -156,6 +191,8 @@ struct AddDownloadSheet: View {
                 }
             }
             .formStyle(.grouped)
+        .harborSurface()
+            .disabled(isSubmitting)
             .padding(.horizontal, -Layout.groupedFormHorizontalExpansion)
 
             if let validationMessage {
@@ -166,7 +203,8 @@ struct AddDownloadSheet: View {
             HStack {
                 Spacer()
 
-                Button("Cancel") {
+                Button(isSubmitting ? "Stop Import" : "Cancel") {
+                    manifestTask?.cancel()
                     dismiss()
                 }
                 .accessibilityIdentifier(HarborAccessibility.addCancel)
@@ -186,12 +224,13 @@ struct AddDownloadSheet: View {
                 }
                 .accessibilityIdentifier(HarborAccessibility.addSubmit)
                 .keyboardShortcut(.defaultAction)
-                .disabled(canSubmit == false || isSubmitting)
+                .disabled(canSubmit == false || isSubmitting || isReadingManifest)
             }
         }
         .padding(24)
         .frame(minWidth: 540, idealWidth: 620, maxWidth: 720)
         .accessibilityIdentifier(HarborAccessibility.addSheet)
+        .harborSurface()
         .background(AddDownloadSheetTitleHider())
         .coordinateSpace(name: "add-download-sheet")
         .simultaneousGesture(SpatialTapGesture().onEnded { tap in
@@ -208,10 +247,15 @@ struct AddDownloadSheet: View {
             }
         }
         .onDisappear {
+            manifestTask?.cancel()
             mediaPreviewTask?.cancel()
             mediaPreviewGeneration += 1
         }
+        .onChange(of: settings.manifestImportEnabled) { _, enabled in
+            if !enabled { clearManifest() }
+        }
         .onChange(of: entryMode) { _, newMode in
+            clearManifest()
             validationMessage = nil
             mediaPreviewGeneration += 1
             resetMediaPreview()
@@ -310,7 +354,7 @@ struct AddDownloadSheet: View {
             }
             return TorrentPreviewSource(sourceKind: .torrentFile, sourceURL: torrentFileURL)
         case .linkOrMagnet:
-            guard isBatchEntry == false,
+            guard manifestURL == nil, isBatchEntry == false,
                   let parsedLinkURL,
                   let sourceKind = DownloadSourceKind.detect(from: parsedLinkURL),
                   sourceKind == .torrentFile || sourceKind == .magnetLink else {
@@ -680,6 +724,7 @@ struct AddDownloadSheet: View {
     private var canSubmit: Bool {
         switch entryMode {
         case .linkOrMagnet:
+            if manifestURL != nil, manifest == nil { return false }
             if isBatchEntry {
                 return readyBatchURLs.isEmpty == false && isResolvingMedia == false
                     && (batchMedia.isEmpty || hasMediaSavePermission)
@@ -718,19 +763,20 @@ struct AddDownloadSheet: View {
     }
 
     private var parsedLinkURL: URL? {
+        guard manifestURL == nil else { return nil }
         let trimmedURL = sourceURLText.trimmingCharacters(in: .whitespacesAndNewlines)
         return URL(string: trimmedURL)
     }
 
     private var batchEntries: [DownloadSourceImportService.TextEntry] {
-        DownloadSourceImportService.textEntries(from: sourceURLText)
+        manifest?.preview ?? cachedBatchEntries
     }
 
     // Multiple entered lines switch the sheet to batch mode even when some
     // lines are invalid or duplicates. This keeps those lines from being
     // percent-encoded into one bogus URL by Foundation's lenient parser.
     private var parsedBatchURLs: [URL] {
-        batchEntries.compactMap(\.url)
+        manifest?.urls ?? cachedBatchEntries.compactMap(\.url)
     }
 
     private var readyBatchURLs: [URL] {
@@ -769,12 +815,12 @@ struct AddDownloadSheet: View {
     }
 
     private var isBatchEntry: Bool {
-        entryMode == .linkOrMagnet && (batchEntries.count > 1
+        entryMode == .linkOrMagnet && (manifest != nil || batchEntries.count > 1
             || parsedBatchURLs.contains { batchErrors[$0] != nil || requestedBatchMediaURLs.contains($0) })
     }
 
     private var skippedBatchLineCount: Int {
-        batchEntries.filter { $0.status != .ready }.count
+        manifest?.skippedCount ?? batchEntries.filter { $0.status != .ready }.count
     }
 
     @ViewBuilder
@@ -795,7 +841,7 @@ struct AddDownloadSheet: View {
 
             ScrollView {
                 LazyVStack(spacing: 6) {
-                    ForEach(batchEntries) { entry in
+                    ForEach(batchEntries.prefix(50)) { entry in
                         HStack(spacing: 8) {
                             if let url = entry.url, requiresBatchMediaResolution(url),
                                batchMedia[url] == nil, batchErrors[url] == nil {
@@ -818,6 +864,9 @@ struct AddDownloadSheet: View {
                 }
             }
             .frame(maxHeight: 140)
+            if (manifest?.lineCount ?? cachedBatchEntries.count) > 50 {
+                Text("Showing the first 50 entries.").font(.caption).foregroundStyle(.secondary)
+            }
             if canTryAsMedia {
                 Button("Try as Media") { tryAsMedia() }
                     .accessibilityIdentifier(HarborAccessibility.addTryAsMedia)
@@ -925,6 +974,10 @@ struct AddDownloadSheet: View {
     @MainActor
     private func submit() async {
         guard isSubmitting == false else {
+            return
+        }
+        if manifest != nil {
+            beginManifestSubmission()
             return
         }
 
@@ -1114,6 +1167,8 @@ struct AddDownloadSheet: View {
         switch action {
         case let .preview(source):
             torrentPreviewSource = source
+        case .manifest:
+            beginManifestSubmission()
         case let .submit(requests):
             guard isSubmitting == false else {
                 return
@@ -1368,6 +1423,92 @@ struct AddDownloadSheet: View {
 
     private func isKnownMediaHost(_ url: URL) -> Bool {
         AddDownloadMediaResolver.isKnownMediaHost(url)
+    }
+
+    private func clearManifest() {
+        manifestTask?.cancel()
+        manifestTask = nil
+        manifestURL = nil
+        manifest = nil
+        isReadingManifest = false
+        isSubmitting = false
+    }
+
+    private func chooseManifest() {
+        guard settings.manifestImportEnabled else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.plainText, .text, .data]
+        panel.prompt = String(localized: "Import Links from File")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        clearManifest()
+        manifestURL = url
+        isReadingManifest = true
+        validationMessage = nil
+        mediaPreviewTask?.cancel()
+        mediaPreviewGeneration += 1
+        manifestTask = Task {
+            do {
+                let result = try await DownloadManifestImportService.read(url)
+                guard !Task.isCancelled, settings.manifestImportEnabled else { return }
+                manifest = result
+                isReadingManifest = false
+                if result.urls.isEmpty {
+                    validationMessage = String(localized: "The download list has no supported links. Use a UTF-8 text file with one link per line.")
+                }
+                scheduleMediaPreviewRefresh()
+                updateDestinationForDetectedSourceIfNeeded()
+            } catch {
+                guard !Task.isCancelled else { return }
+                isReadingManifest = false
+                validationMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func beginManifestSubmission() {
+        guard settings.manifestImportEnabled, manifest != nil, !isSubmitting else { return }
+        let urls = readyBatchURLs
+        guard !urls.isEmpty else { return }
+        if !hasApprovedSensitiveTorrentHeaders, requestHeaders.triggersSensitiveTorrentWarning,
+           urls.contains(where: { DownloadSourceKind.detect(from: $0)?.usesAria2 == true }) {
+            pendingSensitiveTorrentAction = .manifest
+            return
+        }
+        isSubmitting = true
+        importedCount = 0
+        let folder = URL(fileURLWithPath: destinationPath, isDirectory: true)
+        manifestTask = Task { @MainActor in
+            defer { isSubmitting = false }
+            for start in stride(from: 0, to: urls.count, by: 32) {
+                guard !Task.isCancelled, settings.manifestImportEnabled else { return }
+                let requests = AddDownloadRequest.batch(
+                    from: Array(urls[start..<min(start + 32, urls.count)]),
+                    destinationFolder: folder,
+                    shouldStartImmediately: shouldStartImmediately,
+                    requestHeaders: requestHeaders,
+                    tags: tags,
+                    mediaMetadata: batchMedia,
+                    mediaDefaults: settings.mediaDefaults
+                )
+                if let onImport { await onImport(requests) }
+                else { onSubmit(requests) }
+                importedCount += requests.count
+                await Task.yield()
+            }
+            guard !Task.isCancelled else { return }
+            let submitted = Set(urls)
+            manifest?.urls.removeAll { submitted.contains($0) }
+            if manifest?.urls.isEmpty == true { dismiss() }
+            else {
+                let remainingURLs = manifest?.urls ?? []
+                manifest?.preview = remainingURLs.prefix(50).enumerated().map {
+                    .init(id: $0.offset, text: $0.element.absoluteString, url: $0.element, status: .ready)
+                }
+                validationMessage = String(localized: "Ready links were added. Check the remaining links.")
+            }
+        }
     }
 
     private func loadMediaFireFolder(_ url: URL) {

@@ -6,7 +6,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT_PATH="$PROJECT_DIR/Harbor.xcodeproj"
 SCHEME="Harbor"
 CONFIGURATION="${CONFIGURATION:-Release}"
-DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$PROJECT_DIR/build/DerivedData}"
+DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$PROJECT_DIR/build/HarborDerivedData}"
 STAGING_ROOT="${STAGING_ROOT:-$PROJECT_DIR/build/dmg-root}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/build/release}"
 CODE_SIGNING_ALLOWED="${CODE_SIGNING_ALLOWED:-NO}"
@@ -97,6 +97,11 @@ hdiutil create \
   -format UDZO \
   "$DMG_PATH" >/dev/null
 
+if [ -n "$SIGNING_IDENTITY" ]; then
+  /usr/bin/codesign --force --sign "$SIGNING_IDENTITY" --timestamp "$DMG_PATH"
+  /usr/bin/codesign --verify --strict --verbose=2 "$DMG_PATH"
+fi
+
 echo
 echo "Created:"
 echo "  $DMG_PATH"
@@ -105,7 +110,7 @@ echo "When users open this DMG, they'll see Harbor.app and an Applications short
 if [ -n "$SIGNING_IDENTITY" ]; then
   echo "Signed with:"
   echo "  $SIGNING_IDENTITY"
-  echo "Notarize the signed app or DMG before public distribution."
+  echo "Notarize and staple the signed DMG before public distribution."
 else
-  echo "For public distribution, sign and notarize Harbor.app before shipping the DMG."
+  echo "For public distribution, sign the app and DMG. Then notarize and staple the DMG."
 fi

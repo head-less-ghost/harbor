@@ -18,6 +18,7 @@ struct DownloadBulkInspector: View {
             }
             .padding(24)
         }
+        .harborSurface()
         .modifier(DownloadDataRemovalConfirmation(center: center, ids: $pendingDataRemovalIDs))
     }
 

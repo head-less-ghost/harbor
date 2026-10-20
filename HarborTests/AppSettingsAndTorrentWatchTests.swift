@@ -4,6 +4,25 @@ import XCTest
 
 @MainActor
 final class AppSettingsAndTorrentWatchTests: XCTestCase {
+    func testAppearanceAndExperimentalFeaturesDefaultAndPersist() {
+        let suiteName = "HarborTests.Experimental.\(UUID())"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = AppSettingsStore(userDefaults: defaults)
+        XCTAssertEqual(settings.appearance, .system)
+        XCTAssertFalse(settings.manifestImportEnabled)
+        XCTAssertFalse(settings.torrentVPNEnabled)
+        settings.appearance = .pureDark
+        settings.manifestImportEnabled = true
+        settings.torrentVPNEnabled = true
+        XCTAssertEqual(settings.torrentVPN.route, .blocked)
+
+        let restored = AppSettingsStore(userDefaults: defaults)
+        XCTAssertEqual(restored.appearance, .pureDark)
+        XCTAssertTrue(restored.manifestImportEnabled)
+        XCTAssertTrue(restored.torrentVPNEnabled)
+    }
+
     func testCustomStagingDefaultsOffAndCanBeRestored() {
         let suiteName = "HarborTests.DownloadStaging.\(UUID().uuidString)"
         let userDefaults = UserDefaults(suiteName: suiteName)!

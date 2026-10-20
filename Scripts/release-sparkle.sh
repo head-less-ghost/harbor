@@ -186,6 +186,10 @@ resign_exported_app() {
     if [ -f "$APP_PATH/Contents/Resources/TorrentRuntime/$architecture/bin/aria2-next" ]; then
       codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp "$APP_PATH/Contents/Resources/TorrentRuntime/$architecture/bin/aria2-next"
     fi
+
+    for executable in harbor-vpn harbor-openvpn; do
+      codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp "$APP_PATH/Contents/Resources/VPNRuntime/$architecture/bin/$executable"
+    done
   done
 
   for architecture in arm64 x86_64; do
@@ -415,6 +419,16 @@ verify_dmg_contents() {
 
 echo "Validating DMG contents..."
 verify_dmg_contents
+
+echo "Signing $DMG_NAME..."
+codesign --force --sign "$SIGN_IDENTITY" --timestamp "$DMG_PATH"
+codesign --verify --strict --verbose=4 "$DMG_PATH"
+
+echo "Notarizing $DMG_NAME..."
+xcrun notarytool submit "$DMG_PATH" --keychain-profile "$NOTARY_PROFILE" --wait
+xcrun stapler staple "$DMG_PATH"
+xcrun stapler validate "$DMG_PATH"
+spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG_PATH"
 
 ensure_pages_worktree
 

@@ -77,6 +77,7 @@ private struct DownloadInspectorContent: View {
             .padding(24)
         }
         .navigationTitle(item.displayName)
+        .harborSurface()
         .sheet(isPresented: $showsTorrentPreview) {
             TorrentContentsSelectionSheet(
                 loadPreview: { try await center.previewTorrentContents(id: item.id) },

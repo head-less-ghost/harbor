@@ -7,6 +7,14 @@ struct GeneralSettingsTab: View {
         @Bindable var settings = settings
 
         Form {
+            Section("Appearance") {
+                Picker("Appearance", selection: $settings.appearance) {
+                    ForEach(AppAppearance.allCases) { appearance in
+                        Text(appearance.title).tag(appearance)
+                    }
+                }
+                .accessibilityIdentifier("settings.appearance")
+            }
             Section("Behavior") {
                 Toggle("Start downloads immediately", isOn: $settings.startDownloadsAutomatically)
                 Toggle("Send download notifications", isOn: $settings.notificationsEnabled)
@@ -27,6 +35,7 @@ struct GeneralSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+        .harborSurface()
         .onAppear {
             settings.refreshStartAtLoginStatus()
         }
@@ -126,6 +135,7 @@ struct DownloadsSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+        .harborSurface()
     }
 
     private var proxyExplanation: LocalizedStringResource {
@@ -291,6 +301,7 @@ struct TorrentsSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+        .harborSurface()
         .onAppear {
             settings.refreshNetworkBindingTargets()
         }
@@ -377,6 +388,7 @@ struct BandwidthSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+        .harborSurface()
     }
 }
 
@@ -411,6 +423,7 @@ struct UpdatesSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+        .harborSurface()
     }
 }
 

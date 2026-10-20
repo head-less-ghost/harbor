@@ -101,6 +101,9 @@ struct RootView: View {
                         sourceURL: url,
                         requestHeaders: requestHeaders
                     )
+                },
+                onImport: { requests in
+                    await center.queueImportedDownloads(requests)
                 }
             ) { requests in
                 center.queueDownloads(requests)

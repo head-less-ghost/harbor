@@ -26,6 +26,7 @@ struct HarborApp: App {
     var body: some Scene {
         WindowGroup("Harbor", id: "main") {
             RootView(center: center, settings: settings)
+                .modifier(HarborAppearance(appearance: settings.appearance))
                 .frame(minWidth: 1_040, minHeight: 680)
                 .defaultAppStorage(HarborTestRuntime.userDefaults)
                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
@@ -52,6 +53,7 @@ struct HarborApp: App {
 
         Settings {
             SettingsView(settings: settings, updater: updater)
+                .modifier(HarborAppearance(appearance: settings.appearance))
                 .defaultAppStorage(HarborTestRuntime.userDefaults)
         }
         .windowResizability(.contentSize)

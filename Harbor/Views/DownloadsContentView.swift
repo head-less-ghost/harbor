@@ -87,11 +87,20 @@ struct DownloadsContentView: View {
                 } rows: {
                     ForEach(downloads) { item in
                         TableRow(item)
-                            .contextMenu {
-                                rowContextMenu(for: item)
-                            }
                     }
                 }
+                .contextMenu(forSelectionType: UUID.self) { ids in
+                    if !ids.isEmpty {
+                        DownloadSelectionActions(
+                            center: center,
+                            ids: ids,
+                            singleItem: ids.count == 1 ? downloads.first { ids.contains($0.id) } : nil
+                        ) { pendingDataRemovalIDs = $0 }
+                    }
+                } primaryAction: { ids in
+                    center.openFinishedDownloads(ids: ids)
+                }
+                .harborSurface()
                 .accessibilityIdentifier(HarborAccessibility.downloadsTable)
             }
         }
@@ -172,14 +181,6 @@ struct DownloadsContentView: View {
         case .cancelled:
             "Cancelled items stay in history until you remove them."
         }
-    }
-
-    private func rowContextMenu(for item: DownloadItem) -> some View {
-        DownloadSelectionActions(
-            center: center,
-            ids: center.contextMenuDownloadIDs(for: item.id),
-            singleItem: item
-        ) { pendingDataRemovalIDs = $0 }
     }
 
 }

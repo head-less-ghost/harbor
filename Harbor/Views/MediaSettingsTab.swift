@@ -25,5 +25,6 @@ struct MediaSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+        .harborSurface()
     }
 }

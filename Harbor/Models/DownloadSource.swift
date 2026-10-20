@@ -1,6 +1,6 @@
 import Foundation
 
-enum DownloadSourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
+nonisolated enum DownloadSourceKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case directURL
     case magnetLink
     case torrentFile

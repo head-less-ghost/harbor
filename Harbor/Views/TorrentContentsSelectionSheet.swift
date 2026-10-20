@@ -49,6 +49,7 @@ struct TorrentContentsSelectionSheet: View {
         .padding(20)
         .frame(minWidth: 640, idealWidth: 720, minHeight: 460, idealHeight: 560)
         .accessibilityIdentifier(HarborAccessibility.torrentSheet)
+        .harborSurface()
         .interactiveDismissDisabled(isSaving)
         .task(id: loadGeneration) {
             await load()

@@ -83,6 +83,9 @@ struct DownloadTransferSettings: Equatable, Sendable {
 @MainActor
 final class AppSettingsStore {
     private enum Keys {
+        static let appearance = "appearance"
+        static let manifestImportEnabled = "experimental.manifestImportEnabled"
+        static let torrentVPNEnabled = "experimental.torrentVPNEnabled"
         static let defaultDestinationPath = "defaultDestinationPath"
         static let torrentDestinationPath = "torrentDestinationPath"
         static let torrentWatchFolderPath = "torrentWatchFolderPath"
@@ -126,6 +129,19 @@ final class AppSettingsStore {
     static let seedingRatioRange = 0.1 ... 100.0
 
     private let userDefaults: UserDefaults
+    var appearance: AppAppearance {
+        didSet { userDefaults.set(appearance.rawValue, forKey: Keys.appearance) }
+    }
+    var manifestImportEnabled: Bool {
+        didSet { userDefaults.set(manifestImportEnabled, forKey: Keys.manifestImportEnabled) }
+    }
+    let torrentVPN: TorrentVPNController
+    var torrentVPNEnabled: Bool {
+        didSet {
+            userDefaults.set(torrentVPNEnabled, forKey: Keys.torrentVPNEnabled)
+            torrentVPN.setEnabled(torrentVPNEnabled)
+        }
+    }
     @ObservationIgnored private let loginItemController: any LoginItemControlling
     @ObservationIgnored private let networkBindingCatalog: any NetworkBindingCataloging
     @ObservationIgnored var transferSettingsDidChange: ((DownloadTransferSettings) -> Void)?
@@ -417,6 +433,11 @@ final class AppSettingsStore {
         networkBindingCatalog: (any NetworkBindingCataloging)? = nil
     ) {
         self.userDefaults = userDefaults
+        self.appearance = userDefaults.string(forKey: Keys.appearance)
+            .flatMap(AppAppearance.init(rawValue:)) ?? .system
+        self.manifestImportEnabled = userDefaults.bool(forKey: Keys.manifestImportEnabled)
+        self.torrentVPN = TorrentVPNController(defaults: userDefaults)
+        self.torrentVPNEnabled = userDefaults.bool(forKey: Keys.torrentVPNEnabled)
         self.mediaPreferredFormat = MediaPreferredFormat(
             rawValue: userDefaults.string(forKey: Keys.mediaPreferredFormat) ?? ""
         ) ?? .bestAvailable

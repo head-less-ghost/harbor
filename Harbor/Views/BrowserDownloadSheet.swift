@@ -21,6 +21,7 @@ struct BrowserDownloadSheet: View {
         }
         .frame(minWidth: 760, idealWidth: 960, minHeight: 560, idealHeight: 680)
         .accessibilityIdentifier(HarborAccessibility.browserSheet)
+        .harborSurface()
     }
 
     private var header: some View {

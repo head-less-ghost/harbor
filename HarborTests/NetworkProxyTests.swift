@@ -4,6 +4,21 @@ import XCTest
 @testable import Harbor
 
 final class NetworkProxyTests: XCTestCase {
+    func testDisconnectedVPNBlocksEngineBeforeStartup() async {
+        let service = Aria2TorrentService(daemonStartupOperation: { _ in
+            XCTFail("A disconnected VPN must not start the torrent engine.")
+        })
+        await service.setVPNRoute(.blocked)
+        do {
+            _ = try await service.allKnownGIDs()
+            XCTFail("Torrent operations must wait for the VPN.")
+        } catch {
+            guard case TorrentEngineError.vpnUnavailable = error else {
+                return XCTFail("Expected the VPN block, received \(error).")
+            }
+        }
+    }
+
     func testManualHTTPProxyConfiguresURLSessionAndAria2Next() throws {
         let settings = NetworkProxySettings(
             mode: .manual,

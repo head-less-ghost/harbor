@@ -135,6 +135,7 @@ final class DownloadCenter {
     @ObservationIgnored private var torrentStartTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var torrentPauseTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var networkBindingTask: Task<Void, Never>?
+    @ObservationIgnored private var vpnRouteTask: Task<Void, Never>?
     @ObservationIgnored private var torrentStopSeedingTasks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var pendingTorrentPauseIDs: Set<UUID> = []
     @ObservationIgnored private var pendingTorrentSeedingRestartIDs: Set<UUID> = []
@@ -352,6 +353,10 @@ final class DownloadCenter {
         self.networkBindingMonitor.statusDidChange = { [weak self] status in
             self?.handleNetworkBindingStatus(status)
         }
+        settings.torrentVPN.routeDidChange = { [weak self] route in
+            self?.applyVPNRoute(route)
+        }
+        settings.torrentVPN.setEnabled(settings.torrentVPNEnabled)
         monitorSleepPrevention()
     }
 
@@ -410,6 +415,7 @@ final class DownloadCenter {
             // know its interface by then, or a restored torrent would briefly
             // transfer over whatever route the system happens to prefer.
             await applyNetworkBindingBeforeEngineUse()
+            await torrentService.setVPNRoute(settings.torrentVPN.route)
 
             do {
                 try await mediaService.terminateOrphanedMediaProcesses()
@@ -479,7 +485,7 @@ final class DownloadCenter {
                 }
 
             downloads = restoredItems
-            if case .unavailable = settings.networkBindingStatus {
+            if !settings.torrentVPNEnabled, case .unavailable = settings.networkBindingStatus {
                 suspendTorrentsForUnavailableNetwork(settings.networkBindingStatus)
             }
             try await reconcileCompletedMediaDownloads()
@@ -646,7 +652,7 @@ final class DownloadCenter {
             await torrentBlocklistController.activate()
             initializationState = .loaded
             initializationFailureMessage = nil
-            if settings.networkBindingStatus.isAvailable {
+            if !settings.torrentVPNEnabled, settings.networkBindingStatus.isAvailable {
                 resumeTorrentsForAvailableNetwork(settings.networkBindingStatus)
             }
             presentNextQueuedExternalAddSheetIfNeeded()
@@ -1711,6 +1717,7 @@ final class DownloadCenter {
     }
 
     private func canonicalTags(_ tags: [String]) -> [String] {
+        guard !tags.isEmpty else { return [] }
         let existing = availableTags
         return DownloadTags.normalized(tags).map { tag in
             existing.first { DownloadTags.key($0) == DownloadTags.key(tag) } ?? tag
@@ -2038,6 +2045,7 @@ final class DownloadCenter {
 
     private func handleNetworkBindingStatus(_ status: NetworkBindingStatus) {
         settings.updateNetworkBindingStatus(status)
+        guard !settings.torrentVPNEnabled else { return }
 
         guard isShuttingDown == false else {
             return
@@ -2048,6 +2056,30 @@ final class DownloadCenter {
             suspendTorrentsForUnavailableNetwork(status)
         case .unrestricted, .bound:
             resumeTorrentsForAvailableNetwork(status)
+        }
+    }
+
+    private func applyVPNRoute(_ route: TorrentVPNRoute) {
+        let previous = vpnRouteTask
+        vpnRouteTask = Task { @MainActor [weak self] in
+            await previous?.value
+            guard let self, !isShuttingDown, settings.torrentVPN.route == route else { return }
+            await torrentService.setVPNRoute(route)
+            if route == .disabled {
+                await torrentService.setNetworkBinding(settings.networkBindingStatus)
+            }
+            // Existing GIDs are session-local. New attempts use the same stored
+            // source and destination, preserving downloaded pieces on disk.
+            for item in downloads where item.backend == .aria2 && (item.status.isRunning || item.status == .seeding) {
+                item.speedBytesPerSecond = 0
+                item.uploadBytesPerSecond = 0
+                item.updatedAt = .now
+                setStatus(for: item, to: .queued)
+            }
+            if initializationState == .loaded {
+                schedulePersist()
+                startNextQueuedDownloadsIfNeeded()
+            }
         }
     }
 
@@ -2453,6 +2485,7 @@ final class DownloadCenter {
             resumeAfterFailedAuthoritativeShutdown()
             return false
         }
+        settings.torrentVPN.disconnect()
         return true
     }
 
@@ -2530,6 +2563,7 @@ final class DownloadCenter {
             isShuttingDown = false
             return false
         }
+        settings.torrentVPN.disconnect()
         return true
     }
 
@@ -2630,6 +2664,7 @@ final class DownloadCenter {
         sourceURL: URL,
         requestHeaders: [RequestHeader]
     ) async throws -> TorrentContentsPreview {
+        await vpnRouteTask?.value
         return try await TorrentContentsPreviewService().preview(
             sourceKind: sourceKind,
             sourceURL: sourceURL,
@@ -2777,6 +2812,25 @@ final class DownloadCenter {
         }
     }
 
+    /// The sheet supplies small chunks. Prepare torrent files in sequence so a
+    /// large manifest cannot create one preparation task per line.
+    func queueImportedDownloads(_ requests: [AddDownloadRequest]) async {
+        guard canAddDownloads else { return }
+        var items: [DownloadItem] = []
+        for request in requests {
+            guard !Task.isCancelled, canAddDownloads else { break }
+            if request.sourceKind == .torrentFile || request.preparedTorrentMetainfo != nil {
+                await prepareAndQueueTorrent(request, isWatchedImport: false)
+            } else {
+                items.append(insertDownload(request, publish: false))
+            }
+        }
+        downloads.insert(contentsOf: items.reversed(), at: 0)
+        if let last = items.last { selectDownload(last.id) }
+        schedulePersist()
+        startNextQueuedDownloadsIfNeeded()
+    }
+
     func queueDownload(_ request: AddDownloadRequest) {
         guard canAddDownloads else {
             return
@@ -2795,7 +2849,8 @@ final class DownloadCenter {
     @discardableResult
     private func insertDownload(
         _ request: AddDownloadRequest,
-        managedTorrentSource: ManagedTorrentSource? = nil
+        managedTorrentSource: ManagedTorrentSource? = nil,
+        publish: Bool = true
     ) -> DownloadItem {
         let backend = backend(for: request.sourceKind)
         let preferredFilename: String?
@@ -2839,6 +2894,7 @@ final class DownloadCenter {
             item.metadataName = magnetDisplayName
         }
 
+        guard publish else { return item }
         downloads.insert(item, at: 0)
         selectDownload(item.id)
 
@@ -4177,6 +4233,14 @@ final class DownloadCenter {
         openDownloads(ids: selectedDownloadIDs)
     }
 
+    func openFinishedDownloads(ids: Set<UUID>) {
+        for item in orderedDownloads(for: ids) {
+            guard item.finishedAt != nil,
+                  let url = item.fileLocationURL else { continue }
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     func openDownloads(ids: Set<UUID>) {
         for item in orderedDownloads(for: ids) {
             guard let url = item.fileLocationURL else {
@@ -4710,8 +4774,13 @@ final class DownloadCenter {
         guard let item = item(for: id) else {
             return
         }
+        if item.backend == .aria2, !settings.torrentVPN.route.permitsTorrents {
+            setStatus(for: item, to: .queued)
+            item.lastError = String(localized: "Waiting for the torrent VPN. Connect it in Settings › Experimental.")
+            return
+        }
 
-        if item.backend == .aria2,
+        if item.backend == .aria2, !settings.torrentVPNEnabled,
            case .unavailable = settings.networkBindingStatus {
             item.wasSuspendedForNetworkBinding = true
             setStatus(for: item, to: .paused)
@@ -5587,6 +5656,7 @@ final class DownloadCenter {
     }
 
     private func startTorrentDownload(id: UUID) async {
+        await vpnRouteTask?.value
         defer {
             torrentStartTasks.removeValue(forKey: id)
             if pendingTorrentPauseIDs.remove(id) != nil,
@@ -6461,6 +6531,7 @@ final class DownloadCenter {
     }
 
     private func refreshTorrentDownloads() async {
+        guard settings.torrentVPN.route.permitsTorrents else { return }
         let torrentItems = downloads.filter {
             $0.backend == .aria2 && $0.backendIdentifier != nil
         }

@@ -80,6 +80,7 @@ struct RequestHeadersEditor: View {
         }
         .padding(20)
         .frame(minWidth: 460, idealWidth: 500, maxWidth: 560, minHeight: 260, idealHeight: 300)
+        .harborSurface()
         .onAppear {
             isRequestHeadersEditorFocused = true
         }

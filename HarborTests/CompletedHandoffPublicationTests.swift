@@ -4,6 +4,26 @@ import XCTest
 @testable import Harbor
 
 extension HarborModelAndSafetyTests {
+    func testCompletedPlacementAcceptsTheSameDirectoryThroughPathAliases() throws {
+        let root = URL(fileURLWithPath: "/private/tmp/HarborHandoffAlias-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let payload = Data("A completed download".utf8)
+        let incoming = root.appendingPathComponent("incoming.download")
+        try payload.write(to: incoming)
+        let store = CompletedDownloadHandoffStore(directoryURL: root.appendingPathComponent("handoffs", isDirectory: true))
+        let handoff = try store.publish(payloadAt: incoming, manifest: .init(
+            downloadID: UUID(), attemptIdentifier: UUID(), owner: .direct,
+            sourceURL: URL(string: "https://example.test/readme.txt")!, statusCode: 200,
+            mimeType: "text/plain", suggestedFilename: "readme.txt",
+            actualBytes: Int64(payload.count), expectedBytes: Int64(payload.count)
+        ))
+        let recorded = try store.recordDestination(root.appendingPathComponent("readme.txt"), for: handoff)
+        try payload.write(to: XCTUnwrap(recorded.placementStagingURL))
+
+        XCTAssertNoThrow(try store.validatePlacementStaging(for: recorded))
+    }
+
     func testAutomaticCleanupRemovesPublishedDownloadOnlyWhenEnabled() async throws {
         for enabled in [false, true] {
             let root = FileManager.default.temporaryDirectory.appendingPathComponent("HarborAutoCompletion-\(UUID())")

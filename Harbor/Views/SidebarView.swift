@@ -28,6 +28,7 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .harborSurface()
         .accessibilityIdentifier(HarborAccessibility.sidebar)
         .navigationTitle("Downloads")
     }

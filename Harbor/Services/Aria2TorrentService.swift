@@ -9,6 +9,7 @@ enum TorrentEngineError: LocalizedError {
     case invalidResponse
     case rpc(String)
     case networkInterfaceUnavailable(String)
+    case vpnUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -20,6 +21,8 @@ enum TorrentEngineError: LocalizedError {
             "This download source isn’t valid for the torrent engine."
         case .invalidResponse:
             "The torrent engine returned an invalid response."
+        case .vpnUnavailable:
+            "Torrent traffic is blocked. Connect the VPN in Settings › Experimental."
         case let .rpc(message):
             message
         case let .networkInterfaceUnavailable(displayName):
@@ -297,6 +300,7 @@ actor Aria2TorrentService {
     private let startupLogBuffer = TorrentEngineLogBuffer()
     private var transferSettings: DownloadTransferSettings
     private var proxySettings: NetworkProxySettings
+    private var vpnRoute: TorrentVPNRoute = .disabled
     private var peerBlocklistRules: [String] = []
     private var networkBinding: NetworkBindingStatus = .unrestricted
     private var isRetryingAfterSessionRecovery = false
@@ -394,6 +398,7 @@ actor Aria2TorrentService {
             return
         }
         self.proxySettings = proxySettings
+        guard vpnRoute == .disabled else { return }
 
         let proxyURI: String
         do {
@@ -418,6 +423,14 @@ actor Aria2TorrentService {
         } catch {
             logger.warning("Failed to update torrent proxy settings: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    func setVPNRoute(_ route: TorrentVPNRoute) {
+        guard vpnRoute != route else { return }
+        vpnRoute = route
+        // Stop old peer sockets before changing routes. The application records
+        // retain each transfer; stale engine IDs recover through the existing path.
+        resetDaemon(terminateIfRunning: true)
     }
 
     func contents(gid: String, directoryURL: URL) async throws -> TorrentContentsPreview {
@@ -1095,6 +1108,7 @@ actor Aria2TorrentService {
     }
 
     private func ensureDaemonRunning() async throws {
+        guard vpnRoute.permitsTorrents else { throw TorrentEngineError.vpnUnavailable }
         if isDaemonReady,
            let process,
            process.isRunning,
@@ -1266,9 +1280,10 @@ actor Aria2TorrentService {
     }
 
     private func startDaemonUntilReady() async throws {
+        guard vpnRoute.permitsTorrents else { throw TorrentEngineError.vpnUnavailable }
         // Aria2 Next exits immediately when --bt-interface names a missing interface.
         // Refusing here turns that into an explanation the user can act on.
-        if case let .unavailable(displayName) = networkBinding {
+        if vpnRoute == .disabled, case let .unavailable(displayName) = networkBinding {
             throw TorrentEngineError.networkInterfaceUnavailable(displayName)
         }
 
@@ -1283,7 +1298,9 @@ actor Aria2TorrentService {
         try terminatePersistedOwnedDaemonIfNeeded()
         let sessionFileURL = try prepareSessionFile()
         let stateDirectoryURL = try prepareStateDirectory()
-        let proxyURI = try proxySettings.aria2ProxyURI()
+        let proxyURI: String?
+        if case let .connected(uri) = vpnRoute { proxyURI = uri }
+        else { proxyURI = try proxySettings.aria2ProxyURI() }
         try terminateOrphanedDaemons(
             matching: binaryURL,
             sessionFileURL: sessionFileURL
@@ -1299,7 +1316,10 @@ actor Aria2TorrentService {
             rpcSecret: secret,
             hostProcessIdentifier: ProcessInfo.processInfo.processIdentifier,
             transferSettings: transferSettings,
-            networkBinding: networkBinding,
+            networkBinding: vpnRoute == .disabled ? networkBinding : .bound(
+                displayName: "Private VPN",
+                binding: ResolvedNetworkBinding(interfaceName: "lo0", ipv4Address: "127.0.0.1")
+            ),
             proxyURI: proxyURI
         )
 

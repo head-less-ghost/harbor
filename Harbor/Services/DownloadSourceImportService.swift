@@ -2,9 +2,9 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
-enum DownloadSourceImportService {
-    struct TextEntry: Identifiable, Equatable {
-        enum Status: Equatable {
+nonisolated enum DownloadSourceImportService {
+    nonisolated struct TextEntry: Identifiable, Equatable, Sendable {
+        nonisolated enum Status: Equatable, Sendable {
             case ready
             case duplicate
             case unsupported
@@ -41,17 +41,19 @@ enum DownloadSourceImportService {
 
         var seenKeys = Set<String>()
         return lines.enumerated().map { index, line in
-            let lineURLs = urls(from: line)
-            guard lineURLs.count == 1, let url = lineURLs.first else {
-                return TextEntry(id: index, text: line, url: nil, status: .unsupported)
-            }
-
-            guard seenKeys.insert(deduplicationKey(for: url)).inserted else {
-                return TextEntry(id: index, text: line, url: nil, status: .duplicate)
-            }
-
-            return TextEntry(id: index, text: line, url: url, status: .ready)
+            textEntry(line: line, id: index, seenKeys: &seenKeys)
         }
+    }
+
+    static func textEntry(line: String, id: Int, seenKeys: inout Set<String>) -> TextEntry {
+        let lineURLs = urls(from: line)
+        guard lineURLs.count == 1, let url = lineURLs.first else {
+            return TextEntry(id: id, text: line, url: nil, status: .unsupported)
+        }
+        guard seenKeys.insert(deduplicationKey(for: url)).inserted else {
+            return TextEntry(id: id, text: line, url: nil, status: .duplicate)
+        }
+        return TextEntry(id: id, text: line, url: url, status: .ready)
     }
 
     @MainActor

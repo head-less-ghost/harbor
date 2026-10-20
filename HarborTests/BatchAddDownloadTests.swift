@@ -3,6 +3,35 @@ import XCTest
 @testable import Harbor
 
 final class BatchAddDownloadTests: XCTestCase {
+    func testManifestImportsLargeFileAndKeepsBoundedPreview() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("manifest-\(UUID()).txt")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let links = (0..<10_000).map { "https://example.com/file-\($0).zip" }
+        let text = "\u{FEFF}" + (links + [links[0], "unsupported line", ""]).joined(separator: "\r\n")
+        try text.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try await DownloadManifestImportService.read(file)
+
+        XCTAssertEqual(manifest.urls.map(\.absoluteString), links)
+        XCTAssertEqual(manifest.preview.count, 50)
+        XCTAssertEqual(manifest.skippedCount, 2)
+        XCTAssertEqual(manifest.lineCount, 10_002)
+    }
+
+    func testManifestCancellationStopsReading() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("manifest-\(UUID()).txt")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try "https://example.com/file.zip\n".write(to: file, atomically: true, encoding: .utf8)
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await DownloadManifestImportService.read(file)
+        }
+        do {
+            _ = try await task.value
+            XCTFail("A canceled manifest import must stop reading.")
+        } catch is CancellationError { }
+    }
+
     func testSupportedURLsFromTextParsesOnePerLine() {
         let text = """
         https://example.com/a.zip

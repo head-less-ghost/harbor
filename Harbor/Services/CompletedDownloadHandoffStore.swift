@@ -962,7 +962,10 @@ nonisolated final class CompletedDownloadHandoffStore: @unchecked Sendable {
         let destinationURL = URL(fileURLWithPath: destinationPath).standardizedFileURL
         let stagingURL = URL(fileURLWithPath: stagingPath).standardizedFileURL
         let requiredPrefix = ".harbor-placement-\(manifest.downloadID.uuidString)-\(manifest.attemptIdentifier.uuidString)-"
-        guard stagingURL.deletingLastPathComponent() == destinationURL.deletingLastPathComponent(),
+        // Existing and not-yet-created paths can standardize /private/tmp
+        // differently. Compare the two existing parent directories instead.
+        guard stagingURL.deletingLastPathComponent().resolvingSymlinksInPath()
+                == destinationURL.deletingLastPathComponent().resolvingSymlinksInPath(),
               stagingURL.lastPathComponent.hasPrefix(requiredPrefix) else {
             return nil
         }
