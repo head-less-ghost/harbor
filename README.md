@@ -27,6 +27,9 @@
     <a href="https://github.com/thsnkhn/harbor/commits/main">
       <img src="https://img.shields.io/badge/status-actively%20maintained-2ea043" alt="Actively maintained" />
     </a>
+    <a href="https://hub.xerj.org/contributors/thsnkhn.html">
+      <img src="https://hub.xerj.org/contributors/thsnkhn/badge.svg" alt="XERJ Corpus Hub contributor" />
+    </a>
   </p>
 
   <p>
