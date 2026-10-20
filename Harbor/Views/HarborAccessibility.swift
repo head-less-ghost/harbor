@@ -51,6 +51,7 @@ enum HarborAccessibility {
     static let settingsNetworkInterfacePicker = "settings.torrents.networkInterface"
     static let settingsBandwidth = "settings.bandwidth"
     static let settingsUpdates = "settings.updates"
+    static let settingsExperimental = "settings.experimental"
     static let settingsAcknowledgments = "settings.acknowledgments"
 
     static let browserSheet = "browser-download.sheet"

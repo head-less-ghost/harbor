@@ -42,6 +42,12 @@ struct SettingsView: View {
                     Label("Updates", systemImage: "arrow.triangle.2.circlepath")
                 }
 
+            ExperimentalSettingsTab()
+                .accessibilityIdentifier(HarborAccessibility.settingsExperimental)
+                .tabItem {
+                    Label("Experimental", systemImage: "flask")
+                }
+
             AcknowledgmentsSettingsTab()
                 .accessibilityIdentifier(HarborAccessibility.settingsAcknowledgments)
                 .tabItem {

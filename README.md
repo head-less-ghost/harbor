@@ -109,20 +109,24 @@ Safari has no downloads API for extensions, so this is an approximation. The ext
 
 ### Enable the extension
 
-1. Open Harbor once after installing it.
-2. In Safari, open **Settings → Extensions** and turn on **Harbor**.
+1. In Harbor, open **Settings → Experimental**.
+2. Click **Enable in Safari…**, then turn on **Harbor** in Safari's Extensions settings.
 3. Select Harbor, and set **Other websites** to **Allow**. Without this, Safari doesn't run click interception.
 
 The first time a site hands a link to Harbor, Safari asks: "Do you want to allow this website to open Harbor.app?" Choose **Always Allow** to stop the prompt for that site. Safari asks again for each new site. On bare IP addresses such as `127.0.0.1`, Safari asks every time.
 
 ### Local builds
 
+`script/build_and_run.sh` signs Harbor and its extension with the project's Developer ID identity by default. Set `CODE_SIGN_IDENTITY` to use another identity. Set `CODE_SIGNING_ALLOWED=NO` to build without signing.
+
+Use a notarized Developer ID build to test without Safari's unsigned-extension setting. Set `CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO` when preparing a local build for notarization to omit debugger-only entitlements.
+
 Safari loads unsigned extensions only when you allow them:
 
 1. In Safari, turn on **Settings → Advanced → Show features for web developers**.
 2. In **Settings → Developer**, turn on **Allow unsigned extensions**. Safari turns this off each time it quits.
 
-The extension must be signed and sandboxed, or macOS ignores it. `script/build_and_run.sh` builds with `CODE_SIGNING_ALLOWED=NO`, which leaves it unsigned. If you have no signing identity, sign the build ad hoc and register it:
+The extension must be signed and sandboxed, or macOS ignores it. If you built with `CODE_SIGNING_ALLOWED=NO` and have no signing identity, sign the build ad hoc and register it:
 
 ```sh
 APP=build/HarborDerivedData/Build/Products/Debug/Harbor.app

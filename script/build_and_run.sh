@@ -8,6 +8,7 @@ APP_NAME="Harbor"
 APP_BUNDLE="${DERIVED_DATA_DIR}/Build/Products/Debug/${APP_NAME}.app"
 APP_BINARY="${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
 SUPPORT_DIR="${TMPDIR:-/tmp}/HarborBuildApplicationSupport"
+SIGN_IDENTITY="${CODE_SIGN_IDENTITY:-Developer ID Application: ENOU Labs LLC (2837P98423)}"
 
 pkill -x "${APP_NAME}" >/dev/null 2>&1 || true
 
@@ -17,7 +18,11 @@ xcodebuild build \
   -configuration Debug \
   -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "${DERIVED_DATA_DIR}" \
-  CODE_SIGNING_ALLOWED=NO
+  CODE_SIGNING_ALLOWED="${CODE_SIGNING_ALLOWED:-YES}" \
+  CODE_SIGN_STYLE=Manual \
+  CODE_SIGN_IDENTITY="${SIGN_IDENTITY}" \
+  OTHER_CODE_SIGN_FLAGS=--timestamp \
+  CODE_SIGN_INJECT_BASE_ENTITLEMENTS="${CODE_SIGN_INJECT_BASE_ENTITLEMENTS:-YES}"
 
 launch_app() {
   /usr/bin/open -n "${APP_BUNDLE}" --args \
