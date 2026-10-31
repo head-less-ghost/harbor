@@ -175,10 +175,14 @@ The background script updates an existing **Download with Harbor** menu item or 
 
 Safari can inject content scripts again when website access changes or the extension is turned back on. The scripts allow repeated injection without duplicate declarations or click handlers.
 
-## Other Browser Extensions
+## Community Browser Extensions
 
-- [Chrome Extension](https://github.com/head-less-ghost/harbor-chrome-extension)
-- [Firefox Extension](https://github.com/head-less-ghost/harbor-firefox-extension)
+Community extensions by [head-less-ghost](https://github.com/head-less-ghost):
+
+- [Chrome extension](https://github.com/head-less-ghost/harbor-chrome-extension)
+- [Firefox extension](https://github.com/head-less-ghost/harbor-firefox-extension)
+
+Each requires a local helper. Use manual forwarding; automatic forwarding can cancel the browser download before you confirm it in Harbor.
 
 ## Philosophy
 
